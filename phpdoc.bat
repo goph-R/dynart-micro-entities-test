@@ -1,0 +1,1 @@
+php phpDocumentor.phar -d c:/users/gopher/projects/dynart-micro-entities/src -t docs/api

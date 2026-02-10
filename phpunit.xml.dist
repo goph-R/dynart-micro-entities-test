@@ -1,0 +1,21 @@
+<phpunit>
+    <testsuites>
+        <testsuite name="Micro Entities Tests">
+            <directory>tests</directory>
+        </testsuite>
+    </testsuites>
+    <php>
+        <server name="APP_ENV" value="testing"/>
+        <ini name="error_reporting" value="-1"/>
+        <ini name="display_errors" value="1"/>
+        <ini name="display_startup_errors" value="1"/>
+    </php>
+    <coverage>
+        <include>
+            <directory suffix=".php">vendor/dynart/micro-entities/src</directory>
+        </include>
+        <report>
+            <html outputDirectory="reports/coverage-html" />
+        </report>
+    </coverage>
+</phpunit>
