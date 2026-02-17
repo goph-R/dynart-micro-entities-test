@@ -1,43 +1,35 @@
 {
     "name": "dynart/micro-entities-test",
-    "description": "Test library for Micro Entities",
-    "type": "library",
+    "description": "Test suite for dynart-micro-entities",
+    "type": "project",
     "license": "MIT",
+    "require": {
+        "php": ">=8.0",
+        "dynart/micro-entities": "@dev"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.5"
+    },
     "autoload": {
         "psr-4": {
             "Dynart\\Micro\\Entities\\Test\\": "src/"
         }
     },
-    "authors": [
-        {
-            "name": "gopher",
-            "email": "gopher.hu@gmail.com"
-        }
-    ],
-    "require-dev": {
-        "phpunit/phpunit": "^9.5",
-        "dynart/micro": "^0.8.0 || dev-main",
-        "dynart/micro-entities": "dev-main"
-    },
-    "require": {
-        "php": ">=8.0",
-        "ext-pdo": "*"
-    },
-    "minimum-stability": "dev",
     "repositories": {
-        "dynart-micro": {
-            "type": "path",
-            "url": "../dynart-micro",
-            "options": {
-                "symlink": true
-            }
-        },
         "dynart-micro-entities": {
             "type": "path",
             "url": "../dynart-micro-entities",
             "options": {
                 "symlink": true
             }
+        },
+        "dynart-micro": {
+            "type": "path",
+            "url": "../dynart-micro",
+            "options": {
+                "symlink": true
+            }
         }
-    }
+    },
+    "minimum-stability": "dev"
 }
