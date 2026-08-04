@@ -3,6 +3,7 @@
 namespace Dynart\Micro\Entities\Test\Unit;
 
 use Dynart\Micro\Entities\Attribute\Column;
+use Dynart\Micro\Entities\Attribute\Table;
 use Dynart\Micro\Entities\Entity;
 use Dynart\Micro\Entities\EntityManager;
 use Dynart\Micro\Entities\EntityManagerException;
@@ -13,6 +14,41 @@ use PHPUnit\Framework\TestCase;
 class CompositeEntity extends Entity {
     public int $a = 0;
     public int $b = 0;
+}
+
+#[Table(name: 'custom')]
+class NamedTableEntity extends Entity {
+    #[Column(type: Column::TYPE_INT, primaryKey: true, autoIncrement: true, notNull: true)]
+    public int $id;
+}
+
+class ConstrainedTestEntity extends Entity {
+    #[Column(type: Column::TYPE_STRING, size: 200, unique: true)]
+    public string $slug;
+
+    #[Column(type: Column::TYPE_STRING, size: 20, index: true)]
+    public string $status;
+}
+
+#[Table(unique: ['uq_pair' => ['a', 'b']], index: [['a', 'b']])]
+class CompositeTestEntity extends Entity {
+    #[Column(type: Column::TYPE_INT)]
+    public int $a;
+
+    #[Column(type: Column::TYPE_INT)]
+    public int $b;
+}
+
+#[Table(unique: [['a', 'b']])]
+class MixedConstraintEntity extends Entity {
+    #[Column(type: Column::TYPE_STRING, size: 100, unique: true)]
+    public string $slug;
+
+    #[Column(type: Column::TYPE_INT)]
+    public int $a;
+
+    #[Column(type: Column::TYPE_INT)]
+    public int $b;
 }
 
 class EntityManagerTest extends TestCase {
@@ -166,5 +202,92 @@ class EntityManagerTest extends TestCase {
         $this->expectException(EntityManagerException::class);
         $user = new TestUser();
         $this->em->setByDataArray($user, ['nonexistent' => 'value']);
+    }
+
+    // --- Table attribute ---
+
+    public function testTableIsNullWithoutTheAttribute(): void {
+        $this->assertNull($this->em->table(TestUser::class));
+    }
+
+    public function testTableAttributeOverridesTheTableName(): void {
+        $em = TestHelper::createEntityManager();
+        TestHelper::registerEntity($em, NamedTableEntity::class);
+        $this->assertSame('custom', $em->tableName(NamedTableEntity::class));
+    }
+
+    public function testTableAttributeNameIsPrefixed(): void {
+        $em = TestHelper::createEntityManager('pre_');
+        TestHelper::registerEntity($em, NamedTableEntity::class);
+        $this->assertSame('pre_custom', $em->tableName(NamedTableEntity::class));
+    }
+
+    /**
+     * The attribute processor handles class level attributes first, but the cached table name
+     * must be refreshed either way so registration order can not matter.
+     */
+    public function testTableAttributeAppliedAfterColumnsStillRenamesTheTable(): void {
+        $em = TestHelper::createEntityManager();
+        $ref = new \ReflectionClass(NamedTableEntity::class);
+        foreach ($ref->getProperties() as $property) {
+            foreach ($property->getAttributes(Column::class) as $attr) {
+                $em->addColumn(NamedTableEntity::class, $property->getName(), $attr->newInstance());
+            }
+        }
+        $this->assertSame('namedtableentity', $em->tableName(NamedTableEntity::class));
+        $em->addTable(NamedTableEntity::class, new Table(name: 'custom'));
+        $this->assertSame('custom', $em->tableName(NamedTableEntity::class));
+    }
+
+    // --- Constraints ---
+
+    public function testUniqueConstraintsFromColumns(): void {
+        $em = TestHelper::createEntityManager();
+        TestHelper::registerEntity($em, ConstrainedTestEntity::class);
+        $this->assertSame(
+            [['name' => null, 'columns' => ['slug']]],
+            $em->uniqueConstraints(ConstrainedTestEntity::class)
+        );
+    }
+
+    public function testIndexesFromColumns(): void {
+        $em = TestHelper::createEntityManager();
+        TestHelper::registerEntity($em, ConstrainedTestEntity::class);
+        $this->assertSame(
+            [['name' => null, 'columns' => ['status']]],
+            $em->indexes(ConstrainedTestEntity::class)
+        );
+    }
+
+    public function testNoConstraintsWhenNoneDeclared(): void {
+        $this->assertSame([], $this->em->uniqueConstraints(TestUser::class));
+        $this->assertSame([], $this->em->indexes(TestUser::class));
+    }
+
+    public function testCompositeUniqueFromTableAttributeKeepsItsName(): void {
+        $em = TestHelper::createEntityManager();
+        TestHelper::registerEntity($em, CompositeTestEntity::class);
+        $this->assertSame(
+            [['name' => 'uq_pair', 'columns' => ['a', 'b']]],
+            $em->uniqueConstraints(CompositeTestEntity::class)
+        );
+    }
+
+    public function testCompositeIndexFromTableAttributeWithoutName(): void {
+        $em = TestHelper::createEntityManager();
+        TestHelper::registerEntity($em, CompositeTestEntity::class);
+        $this->assertSame(
+            [['name' => null, 'columns' => ['a', 'b']]],
+            $em->indexes(CompositeTestEntity::class)
+        );
+    }
+
+    public function testColumnAndTableConstraintsAreMerged(): void {
+        $em = TestHelper::createEntityManager();
+        TestHelper::registerEntity($em, MixedConstraintEntity::class);
+        $this->assertSame([
+            ['name' => null, 'columns' => ['slug']],
+            ['name' => null, 'columns' => ['a', 'b']],
+        ], $em->uniqueConstraints(MixedConstraintEntity::class));
     }
 }

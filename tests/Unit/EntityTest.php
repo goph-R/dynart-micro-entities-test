@@ -10,6 +10,10 @@ class EntityTestEntity extends Entity {
     public int $age = 0;
 }
 
+class AliasedEventEntity extends Entity {
+    protected static string $eventName = 'aliased';
+}
+
 class EntityTest extends TestCase {
 
     public function testNewEntityIsNew(): void {
@@ -75,13 +79,62 @@ class EntityTest extends TestCase {
         $this->assertSame($data, $entity->getDirtyFields($data));
     }
 
+    // --- Events ---
+
+    public function testEventNamespaceFallsBackToTheClassName(): void {
+        $this->assertSame(
+            'entity.dynart.micro.entities.test.unit.entitytestentity',
+            EntityTestEntity::eventNamespace()
+        );
+    }
+
+    public function testEventNamespaceUsesTheDeclaredAlias(): void {
+        $this->assertSame('entity.aliased', AliasedEventEntity::eventNamespace());
+    }
+
+    public function testEventBuildsAFullName(): void {
+        $this->assertSame('entity.aliased:something_happened', AliasedEventEntity::event('something_happened'));
+    }
+
     public function testBeforeSaveEvent(): void {
         $entity = new EntityTestEntity();
-        $this->assertSame(EntityTestEntity::class . '.before_save', $entity->beforeSaveEvent());
+        $this->assertSame(
+            'entity.dynart.micro.entities.test.unit.entitytestentity:before_save',
+            $entity->beforeSaveEvent()
+        );
     }
 
     public function testAfterSaveEvent(): void {
         $entity = new EntityTestEntity();
-        $this->assertSame(EntityTestEntity::class . '.after_save', $entity->afterSaveEvent());
+        $this->assertSame(
+            'entity.dynart.micro.entities.test.unit.entitytestentity:after_save',
+            $entity->afterSaveEvent()
+        );
+    }
+
+    public function testBeforeDeleteEvent(): void {
+        $entity = new AliasedEventEntity();
+        $this->assertSame('entity.aliased:before_delete', $entity->beforeDeleteEvent());
+    }
+
+    public function testAfterDeleteEvent(): void {
+        $entity = new AliasedEventEntity();
+        $this->assertSame('entity.aliased:after_delete', $entity->afterDeleteEvent());
+    }
+
+    /**
+     * The entity. prefix is what keeps ORM level events from colliding with the service level
+     * events of an application, so it has to be there for aliased entities too.
+     */
+    public function testEveryEventNamespaceStartsWithThePrefix(): void {
+        $this->assertStringStartsWith(Entity::EVENT_NAMESPACE_PREFIX.'.', AliasedEventEntity::eventNamespace());
+        $this->assertStringStartsWith(Entity::EVENT_NAMESPACE_PREFIX.'.', EntityTestEntity::eventNamespace());
+    }
+
+    public function testSnapshotReturnsTheStoredData(): void {
+        $entity = new EntityTestEntity();
+        $data = ['name' => 'Alice', 'age' => 30];
+        $entity->takeSnapshot($data);
+        $this->assertSame($data, $entity->snapshot());
     }
 }

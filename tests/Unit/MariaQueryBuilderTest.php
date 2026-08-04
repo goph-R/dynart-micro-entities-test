@@ -12,7 +12,38 @@ use Dynart\Micro\Entities\Test\Entities\TestUser;
 use Dynart\Micro\Entities\Test\StubConfig;
 use Dynart\Micro\Entities\Test\TestDatabase;
 use Dynart\Micro\Entities\Test\TestHelper;
+use Dynart\Micro\Entities\Attribute\Table;
+use Dynart\Micro\Entities\Entity;
 use PHPUnit\Framework\TestCase;
+
+class ConstrainedEntity extends Entity {
+    #[Column(type: Column::TYPE_INT, primaryKey: true, autoIncrement: true, notNull: true)]
+    public int $id;
+
+    #[Column(type: Column::TYPE_STRING, size: 200, notNull: true, unique: true)]
+    public string $slug;
+
+    #[Column(type: Column::TYPE_STRING, size: 20, index: true)]
+    public string $status;
+}
+
+#[Table(
+    unique: ['uq_pair' => ['content_id', 'tag_id']],
+    index: [['content_id', 'tag_id']]
+)]
+class CompositeConstrainedEntity extends Entity {
+    #[Column(type: Column::TYPE_INT, notNull: true)]
+    public int $content_id;
+
+    #[Column(type: Column::TYPE_INT, notNull: true)]
+    public int $tag_id;
+}
+
+#[Table(name: 'custom_name')]
+class RenamedEntity extends Entity {
+    #[Column(type: Column::TYPE_INT, primaryKey: true, autoIncrement: true, notNull: true)]
+    public int $id;
+}
 
 class MariaQueryBuilderTest extends TestCase {
 
@@ -262,6 +293,60 @@ class MariaQueryBuilderTest extends TestCase {
         $this->assertStringContainsString('on delete cascade', $sql);
     }
 
+    // --- unique & index ---
+
+    public function testUniqueDefinitionWithGeneratedName(): void {
+        $this->assertSame('unique key `uq_slug` (`slug`)', $this->qb->uniqueDefinition(null, ['slug']));
+    }
+
+    public function testUniqueDefinitionWithExplicitName(): void {
+        $this->assertSame(
+            'unique key `uq_content_tag` (`content_id`, `tag_id`)',
+            $this->qb->uniqueDefinition('uq_content_tag', ['content_id', 'tag_id'])
+        );
+    }
+
+    public function testIndexDefinitionWithGeneratedName(): void {
+        $this->assertSame('key `idx_user_id` (`user_id`)', $this->qb->indexDefinition(null, ['user_id']));
+    }
+
+    public function testIndexDefinitionWithMultipleColumns(): void {
+        $this->assertSame(
+            'key `idx_type_status` (`type`, `status`)',
+            $this->qb->indexDefinition(null, ['type', 'status'])
+        );
+    }
+
+    public function testConstraintDefinitionWithoutColumnsThrows(): void {
+        $this->expectException(EntityManagerException::class);
+        $this->qb->uniqueDefinition(null, []);
+    }
+
+    public function testCreateTableWithColumnLevelUniqueAndIndex(): void {
+        $em = TestHelper::createEntityManager();
+        TestHelper::registerEntity($em, ConstrainedEntity::class);
+        $qb = new MariaQueryBuilder(new StubConfig(), $this->db, $em);
+        $sql = $qb->createTable(ConstrainedEntity::class);
+        $this->assertStringContainsString('unique key `uq_slug` (`slug`)', $sql);
+        $this->assertStringContainsString('key `idx_status` (`status`)', $sql);
+    }
+
+    public function testCreateTableWithTableLevelConstraints(): void {
+        $em = TestHelper::createEntityManager();
+        TestHelper::registerEntity($em, CompositeConstrainedEntity::class);
+        $qb = new MariaQueryBuilder(new StubConfig(), $this->db, $em);
+        $sql = $qb->createTable(CompositeConstrainedEntity::class);
+        $this->assertStringContainsString('unique key `uq_pair` (`content_id`, `tag_id`)', $sql);
+        $this->assertStringContainsString('key `idx_content_id_tag_id` (`content_id`, `tag_id`)', $sql);
+    }
+
+    public function testCreateTableUsesTheNameFromTheTableAttribute(): void {
+        $em = TestHelper::createEntityManager();
+        TestHelper::registerEntity($em, RenamedEntity::class);
+        $qb = new MariaQueryBuilder(new StubConfig(), $this->db, $em);
+        $this->assertStringContainsString('create table `custom_name`', $qb->createTable(RenamedEntity::class));
+    }
+
     // --- findAll / SQL generation ---
 
     public function testFindAllImplicitAllFields(): void {
@@ -333,6 +418,44 @@ class MariaQueryBuilderTest extends TestCase {
         $q = new Query(TestUser::class);
         $q->setFields(['email' => 'email']);
         $q->addOrderBy('name');
+        $sql = $this->qb->findAll($q);
+        $this->assertStringNotContainsString('order by', $sql);
+    }
+
+    /**
+     * Non-aliased fields used to be unsortable: orderBy() matched against the array keys of
+     * fields(), which are integers for a plain list.
+     */
+    public function testFindAllOrderByWorksWithNonAliasedField(): void {
+        $q = new Query(TestUser::class);
+        $q->setFields(['name', 'email']);
+        $q->addOrderBy('name');
+        $sql = $this->qb->findAll($q);
+        $this->assertStringContainsString('order by `name` asc', $sql);
+    }
+
+    /**
+     * A query with no explicit fields selects every column of the table, so every column of that
+     * table has to be sortable.
+     */
+    public function testFindAllOrderByWorksWithoutExplicitFields(): void {
+        $q = new Query(TestUser::class);
+        $q->addOrderBy('name', 'desc');
+        $sql = $this->qb->findAll($q);
+        $this->assertStringContainsString('order by `name` desc', $sql);
+    }
+
+    public function testFindAllOrderByIgnoresUnknownColumnWithoutExplicitFields(): void {
+        $q = new Query(TestUser::class);
+        $q->addOrderBy('no_such_column');
+        $sql = $this->qb->findAll($q);
+        $this->assertStringNotContainsString('order by', $sql);
+    }
+
+    public function testFindAllOrderByIgnoresRawExpression(): void {
+        $q = new Query(TestUser::class);
+        $q->setFields([['count(1)']]);
+        $q->addOrderBy('count(1)');
         $sql = $this->qb->findAll($q);
         $this->assertStringNotContainsString('order by', $sql);
     }
