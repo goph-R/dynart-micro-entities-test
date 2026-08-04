@@ -3,6 +3,7 @@
 namespace Dynart\Micro\Entities\Test\Integration;
 
 use Dynart\Micro\Entities\Database\MariaDatabase;
+use Dynart\Micro\Entities\EntityManagerException;
 use Dynart\Micro\Entities\PdoBuilder;
 use Dynart\Micro\Entities\Test\Entities\TestUser;
 use Dynart\Micro\Entities\Test\StubLogger;
@@ -171,6 +172,40 @@ class DatabaseTest extends IntegrationTestCase {
             [':email' => 'updated@test.com']
         );
         $this->assertEquals(2, $count);
+    }
+
+    /**
+     * The condition is written by the caller and the SET placeholders are generated, so a
+     * condition searching by the same column that is being updated used to overwrite the new
+     * value with the one being searched for - the row was "updated" to what it already was, with
+     * no error anywhere.
+     */
+    public function testUpdateWithAConditionOnTheColumnBeingUpdated(): void {
+        $this->insertUser('Alice');
+        $this->insertUser('Bob');
+        $this->db->update(
+            $this->em->tableName(TestUser::class),
+            ['name' => 'Charlie'],
+            '`name` = :name',
+            [':name' => 'Alice']
+        );
+        $names = $this->db->fetchColumn(
+            'select `name` from ' . $this->safeTableName(TestUser::class) . ' order by `name`'
+        );
+        $this->assertContains('Charlie', $names);
+        $this->assertContains('Bob', $names);
+        $this->assertNotContains('Alice', $names);
+    }
+
+    public function testUpdateThrowsWhenAConditionParamCollidesWithAGeneratedOne(): void {
+        $this->insertUser('Alice');
+        $this->expectException(EntityManagerException::class);
+        $this->db->update(
+            $this->em->tableName(TestUser::class),
+            ['name' => 'Charlie'],
+            '`name` = :set_name',
+            [':set_name' => 'Alice']
+        );
     }
 
     // --- getInConditionAndParams() ---
