@@ -2,6 +2,7 @@
 
 namespace Dynart\Micro\Entities\Test\Unit;
 
+use Dynart\Micro\Entities\EntityManagerException;
 use Dynart\Micro\Entities\Query;
 use PHPUnit\Framework\TestCase;
 
@@ -47,6 +48,68 @@ class QueryTest extends TestCase {
         $q->addVariables([':a' => 1]);
         $q->addVariables([':b' => 2]);
         $this->assertSame([':a' => 1, ':b' => 2], $q->variables());
+    }
+
+    /**
+     * Writing `(a = :id) or (b = :id)` as two conditions is normal, so rebinding the same name
+     * to the same value has to keep working.
+     */
+    public function testAddVariablesAllowsTheSameNameWithTheSameValue(): void {
+        $q = new Query('MyClass');
+        $q->addCondition('a = :id', [':id' => 1]);
+        $q->addCondition('b = :id', [':id' => 1]);
+        $this->assertSame([':id' => 1], $q->variables());
+        $this->assertSame(['a = :id', 'b = :id'], $q->conditions());
+    }
+
+    /**
+     * The SQL keeps both occurrences of the placeholder, so a silent overwrite would make the
+     * first condition filter on the second one's value.
+     */
+    public function testAddVariablesRefusesTheSameNameWithADifferentValue(): void {
+        $q = new Query('MyClass');
+        $q->addCondition('a = :id', [':id' => 1]);
+        $this->expectException(EntityManagerException::class);
+        $q->addCondition('b = :id', [':id' => 2]);
+    }
+
+    public function testAddVariablesDistinguishesTypes(): void {
+        $q = new Query('MyClass');
+        $q->addVariables([':id' => 1]);
+        $this->expectException(EntityManagerException::class);
+        $q->addVariables([':id' => '1']);
+    }
+
+    public function testNextParamNameStartsAtZero(): void {
+        $q = new Query('MyClass');
+        $this->assertSame(':author_0', $q->nextParamName('author'));
+    }
+
+    public function testNextParamNameSkipsUsedNames(): void {
+        $q = new Query('MyClass');
+        $q->addVariables([':author_0' => 1, ':author_1' => 2]);
+        $this->assertSame(':author_2', $q->nextParamName('author'));
+    }
+
+    public function testNextParamNameAcceptsALeadingColon(): void {
+        $q = new Query('MyClass');
+        $this->assertSame(':author_0', $q->nextParamName(':author'));
+    }
+
+    public function testNextParamNameIsNotConfusedByASimilarName(): void {
+        $q = new Query('MyClass');
+        $q->addVariables([':author' => 1]);
+        $this->assertSame(':author_0', $q->nextParamName('author'));
+    }
+
+    public function testTwoContributorsCanBothBindWithoutColliding(): void {
+        $q = new Query('MyClass');
+        $first = $q->nextParamName('id');
+        $q->addCondition("a = $first", [$first => 1]);
+        $second = $q->nextParamName('id');
+        $q->addCondition("b = $second", [$second => 2]);
+        $this->assertSame([':id_0' => 1, ':id_1' => 2], $q->variables());
+        $this->assertSame(['a = :id_0', 'b = :id_1'], $q->conditions());
     }
 
     public function testAddConditionAppendsAndMergesVariables(): void {
