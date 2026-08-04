@@ -32,6 +32,16 @@ class FailingMigration implements MigrationInterface {
     public function up(): void { throw new \RuntimeException('boom'); }
 }
 
+class OnlyAddedMigration implements MigrationInterface {
+    public function version(): string { return '2026_08_04_100_only_added'; }
+    public function up(): void {}
+}
+
+class PreRegisteredMigration implements MigrationInterface {
+    public function version(): string { return '2026_08_04_101_pre_registered'; }
+    public function up(): void {}
+}
+
 class NotAMigration {}
 
 class MigrationsTest extends IntegrationTestCase {
@@ -44,11 +54,6 @@ class MigrationsTest extends IntegrationTestCase {
         $this->migrations = new Migrations($this->em, $this->db, $this->qe);
         $this->migrations->postConstruct();
         $this->dropTable(MigrationHistory::class);
-        foreach ([FirstMigration::class, SecondMigration::class, ThirdMigration::class, FailingMigration::class] as $class) {
-            if (!Micro::hasInterface($class)) {
-                Micro::add($class);
-            }
-        }
     }
 
     protected function tearDown(): void {
@@ -66,6 +71,24 @@ class MigrationsTest extends IntegrationTestCase {
         $this->migrations->add(FirstMigration::class);
         $this->migrations->add(FirstMigration::class);
         $this->assertSame([FirstMigration::class], $this->migrations->migrationClasses());
+    }
+
+    /**
+     * The runner resolves migrations through the DI container, so registering one has to put it
+     * there - otherwise every real caller has to remember a second Micro::add().
+     */
+    public function testAddRegistersTheMigrationInTheContainer(): void {
+        $this->assertFalse(Micro::hasInterface(OnlyAddedMigration::class));
+        $this->migrations->add(OnlyAddedMigration::class);
+        $this->assertTrue(Micro::hasInterface(OnlyAddedMigration::class));
+    }
+
+    public function testAddToleratesAnAlreadyRegisteredClass(): void {
+        if (!Micro::hasInterface(PreRegisteredMigration::class)) {
+            Micro::add(PreRegisteredMigration::class);
+        }
+        $this->migrations->add(PreRegisteredMigration::class);
+        $this->assertSame([PreRegisteredMigration::class], $this->migrations->migrationClasses());
     }
 
     // --- Install ---
