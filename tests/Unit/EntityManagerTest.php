@@ -245,6 +245,39 @@ class EntityManagerTest extends TestCase {
         $this->assertSame('custom', $em->tableName(NamedTableEntity::class));
     }
 
+    // --- #ClassName resolution ---
+
+    /**
+     * The `#ClassName` substitution used to compute the name itself, so it would resolve
+     * `#UserRole` to `prefix_userrole` while the entity's declared table was `prefix_user_role` -
+     * silently querying a table that does not exist.
+     */
+    public function testShortNameResolutionHonoursTheTableAttribute(): void {
+        $em = TestHelper::createEntityManager('pre_');
+        TestHelper::registerEntity($em, NamedTableEntity::class);
+        $this->assertSame('pre_custom', $em->tableNameByShortName('NamedTableEntity'));
+    }
+
+    public function testShortNameResolutionForAnEntityWithoutTheAttribute(): void {
+        $this->assertSame('testuser', $this->em->tableNameByShortName('TestUser'));
+    }
+
+    /**
+     * Returning null rather than a guess lets the database layer fall back to its own naming for
+     * a token that is not an entity at all.
+     */
+    public function testShortNameResolutionReturnsNullForAnUnknownName(): void {
+        $this->assertNull($this->em->tableNameByShortName('NoSuchEntity'));
+    }
+
+    public function testShortNameResolutionIsRefreshedWhenTheTableIsRenamed(): void {
+        $em = TestHelper::createEntityManager();
+        $em->addColumn(NamedTableEntity::class, 'id', new Column(type: Column::TYPE_INT, primaryKey: true));
+        $this->assertSame('namedtableentity', $em->tableNameByShortName('NamedTableEntity'));
+        $em->addTable(NamedTableEntity::class, new Table(name: 'renamed'));
+        $this->assertSame('renamed', $em->tableNameByShortName('NamedTableEntity'));
+    }
+
     // --- Constraints ---
 
     public function testUniqueConstraintsFromColumns(): void {
