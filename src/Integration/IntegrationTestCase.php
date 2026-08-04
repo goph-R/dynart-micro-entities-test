@@ -40,7 +40,15 @@ abstract class IntegrationTestCase extends TestCase {
         return $this->db->escapeName($this->em->tableName($className));
     }
 
+    protected function safeAuditTableName(string $className): string {
+        return $this->db->escapeName($this->em->auditTableName($className));
+    }
+
     protected function dropTable(string $className): void {
         $this->db->query('drop table if exists ' . $this->safeTableName($className));
+    }
+
+    protected function dropAuditTable(string $className): void {
+        $this->db->query('drop table if exists ' . $this->safeAuditTableName($className));
     }
 }

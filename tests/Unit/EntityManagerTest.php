@@ -39,6 +39,12 @@ class CompositeTestEntity extends Entity {
     public int $b;
 }
 
+#[\Dynart\Micro\Entities\Attribute\Auditable]
+class AuditedEntity extends Entity {
+    #[Column(type: Column::TYPE_INT, primaryKey: true, autoIncrement: true, notNull: true)]
+    public int $id = 0;
+}
+
 #[Table(unique: [['a', 'b']])]
 class MixedConstraintEntity extends Entity {
     #[Column(type: Column::TYPE_STRING, size: 100, unique: true)]
@@ -280,6 +286,55 @@ class EntityManagerTest extends TestCase {
             [['name' => null, 'columns' => ['a', 'b']]],
             $em->indexes(CompositeTestEntity::class)
         );
+    }
+
+    // --- Auditable ---
+
+    public function testEntityIsNotAuditableByDefault(): void {
+        $this->assertFalse($this->em->isAuditable(TestUser::class));
+        $this->assertSame([], $this->em->auditableClasses());
+    }
+
+    public function testRegisterEntityPicksUpTheAuditableAttribute(): void {
+        $em = TestHelper::createEntityManager();
+        TestHelper::registerEntity($em, AuditedEntity::class);
+        $this->assertTrue($em->isAuditable(AuditedEntity::class));
+        $this->assertSame([AuditedEntity::class], $em->auditableClasses());
+    }
+
+    public function testSetAuditableIsIdempotent(): void {
+        $this->em->setAuditable(TestUser::class);
+        $this->em->setAuditable(TestUser::class);
+        $this->assertSame([TestUser::class], $this->em->auditableClasses());
+    }
+
+    public function testAuditTableName(): void {
+        $this->assertSame('testuser_aud', $this->em->auditTableName(TestUser::class));
+    }
+
+    public function testAuditTableNameWithPrefix(): void {
+        $em = TestHelper::createEntityManager('pre_');
+        TestHelper::registerEntity($em, TestUser::class);
+        $this->assertSame('pre_testuser_aud', $em->auditTableName(TestUser::class));
+    }
+
+    // --- primaryKeyColumns ---
+
+    public function testPrimaryKeyColumnsForSingleColumnKey(): void {
+        $this->assertSame(['id'], $this->em->primaryKeyColumns(TestUser::class));
+    }
+
+    public function testPrimaryKeyColumnsForCompositeKey(): void {
+        $em = TestHelper::createEntityManager();
+        $em->addColumn(CompositeEntity::class, 'a', new Column(type: Column::TYPE_INT, primaryKey: true));
+        $em->addColumn(CompositeEntity::class, 'b', new Column(type: Column::TYPE_INT, primaryKey: true));
+        $this->assertSame(['a', 'b'], $em->primaryKeyColumns(CompositeEntity::class));
+    }
+
+    public function testPrimaryKeyColumnsIsEmptyWithoutAPrimaryKey(): void {
+        $em = TestHelper::createEntityManager();
+        $em->addColumn(CompositeEntity::class, 'a', new Column(type: Column::TYPE_INT));
+        $this->assertSame([], $em->primaryKeyColumns(CompositeEntity::class));
     }
 
     public function testColumnAndTableConstraintsAreMerged(): void {

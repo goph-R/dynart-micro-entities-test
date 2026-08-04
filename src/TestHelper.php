@@ -16,18 +16,9 @@ class TestHelper {
     }
 
     /**
-     * Registers an entity the same way the attribute processor does: the class level attributes
-     * first, then the property level ones.
+     * Registers an entity with the manager's own reflection based registration
      */
     public static function registerEntity(EntityManager $em, string $className): void {
-        $ref = new ReflectionClass($className);
-        foreach ($ref->getAttributes(Table::class) as $attr) {
-            $em->addTable($className, $attr->newInstance());
-        }
-        foreach ($ref->getProperties() as $property) {
-            foreach ($property->getAttributes(Column::class) as $attr) {
-                $em->addColumn($className, $property->getName(), $attr->newInstance());
-            }
-        }
+        $em->registerEntity($className);
     }
 }

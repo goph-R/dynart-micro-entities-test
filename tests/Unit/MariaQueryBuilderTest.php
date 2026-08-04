@@ -12,6 +12,7 @@ use Dynart\Micro\Entities\Test\Entities\TestUser;
 use Dynart\Micro\Entities\Test\StubConfig;
 use Dynart\Micro\Entities\Test\TestDatabase;
 use Dynart\Micro\Entities\Test\TestHelper;
+use Dynart\Micro\Entities\Attribute\Auditable;
 use Dynart\Micro\Entities\Attribute\Table;
 use Dynart\Micro\Entities\Entity;
 use PHPUnit\Framework\TestCase;
@@ -43,6 +44,21 @@ class CompositeConstrainedEntity extends Entity {
 class RenamedEntity extends Entity {
     #[Column(type: Column::TYPE_INT, primaryKey: true, autoIncrement: true, notNull: true)]
     public int $id;
+}
+
+#[Auditable]
+class AuditedTestEntity extends Entity {
+    #[Column(type: Column::TYPE_INT, primaryKey: true, autoIncrement: true, notNull: true)]
+    public int $id = 0;
+
+    #[Column(type: Column::TYPE_STRING, size: 200, notNull: true, unique: true)]
+    public string $slug = '';
+
+    #[Column(type: Column::TYPE_STRING, size: 100, index: true)]
+    public string $title = '';
+
+    #[Column(type: Column::TYPE_INT, foreignKey: [TestUser::class, 'id'], onDelete: Column::ACTION_CASCADE)]
+    public ?int $user_id = null;
 }
 
 class MariaQueryBuilderTest extends TestCase {
@@ -345,6 +361,94 @@ class MariaQueryBuilderTest extends TestCase {
         TestHelper::registerEntity($em, RenamedEntity::class);
         $qb = new MariaQueryBuilder(new StubConfig(), $this->db, $em);
         $this->assertStringContainsString('create table `custom_name`', $qb->createTable(RenamedEntity::class));
+    }
+
+    // --- createAuditTable ---
+
+    private function auditSql(): string {
+        $em = TestHelper::createEntityManager();
+        TestHelper::registerEntity($em, TestUser::class);
+        TestHelper::registerEntity($em, AuditedTestEntity::class);
+        $qb = new MariaQueryBuilder(new StubConfig(), $this->db, $em);
+        return $qb->createAuditTable(AuditedTestEntity::class);
+    }
+
+    public function testCreateAuditTableUsesTheAudSuffix(): void {
+        $this->assertStringContainsString('create table `auditedtestentity_aud`', $this->auditSql());
+    }
+
+    public function testCreateAuditTableCopiesTheSourceColumns(): void {
+        $sql = $this->auditSql();
+        $this->assertStringContainsString('`slug` varchar(200) not null', $sql);
+        $this->assertStringContainsString('`title` varchar(100)', $sql);
+    }
+
+    public function testCreateAuditTableAddsTheRevisionColumns(): void {
+        $sql = $this->auditSql();
+        $this->assertStringContainsString('`rev_id` bigint not null', $sql);
+        $this->assertStringContainsString('`rev_type` char(3) not null', $sql);
+    }
+
+    public function testCreateAuditTableWidensThePrimaryKeyWithTheRevision(): void {
+        $this->assertStringContainsString('primary key (`id`, `rev_id`)', $this->auditSql());
+    }
+
+    /**
+     * The same row appears once per revision, so an auto increment would fight the copied values
+     * and a unique constraint would reject the second revision outright.
+     */
+    public function testCreateAuditTableDropsAutoIncrementAndUnique(): void {
+        $sql = $this->auditSql();
+        $this->assertStringNotContainsString('auto_increment', $sql);
+        $this->assertStringNotContainsString('unique key', $sql);
+    }
+
+    /**
+     * History has to survive the deletion of whatever it points at.
+     */
+    public function testCreateAuditTableDropsForeignKeys(): void {
+        $sql = $this->auditSql();
+        $this->assertStringNotContainsString('foreign key', $sql);
+        $this->assertStringNotContainsString('on delete', $sql);
+    }
+
+    public function testCreateAuditTableKeepsIndexes(): void {
+        $this->assertStringContainsString('key `idx_title` (`title`)', $this->auditSql());
+    }
+
+    public function testCreateAuditTableIfNotExists(): void {
+        $em = TestHelper::createEntityManager();
+        TestHelper::registerEntity($em, TestUser::class);
+        TestHelper::registerEntity($em, AuditedTestEntity::class);
+        $qb = new MariaQueryBuilder(new StubConfig(), $this->db, $em);
+        $sql = $qb->createAuditTable(AuditedTestEntity::class, true);
+        $this->assertStringContainsString('create table if not exists `auditedtestentity_aud`', $sql);
+    }
+
+    public function testTheSourceTableIsUnaffectedByTheAuditDerivation(): void {
+        $em = TestHelper::createEntityManager();
+        TestHelper::registerEntity($em, TestUser::class);
+        TestHelper::registerEntity($em, AuditedTestEntity::class);
+        $qb = new MariaQueryBuilder(new StubConfig(), $this->db, $em);
+        $qb->createAuditTable(AuditedTestEntity::class);
+        $sql = $qb->createTable(AuditedTestEntity::class);
+        $this->assertStringContainsString('auto_increment', $sql);
+        $this->assertStringContainsString('unique key `uq_slug` (`slug`)', $sql);
+        $this->assertStringContainsString('foreign key (`user_id`)', $sql);
+    }
+
+    // --- dropTable ---
+
+    public function testDropTable(): void {
+        $this->assertSame('drop table if exists `testuser`', $this->qb->dropTableByClass(TestUser::class));
+    }
+
+    public function testDropTableWithoutIfExists(): void {
+        $this->assertSame('drop table `testuser`', $this->qb->dropTableByClass(TestUser::class, false));
+    }
+
+    public function testDropAuditTable(): void {
+        $this->assertSame('drop table if exists `testuser_aud`', $this->qb->dropAuditTableByClass(TestUser::class));
     }
 
     // --- findAll / SQL generation ---
