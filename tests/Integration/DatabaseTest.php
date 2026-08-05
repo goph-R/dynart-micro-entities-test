@@ -144,6 +144,54 @@ class DatabaseTest extends IntegrationTestCase {
         $this->assertGreaterThan(0, (int)$id);
     }
 
+    // --- booleans ---
+
+    /**
+     * `false` is not an empty string
+     *
+     * `PDOStatement::execute()` binds every value as a string, and `false` as a string is `''`.
+     * A server in strict mode - the default in MySQL since 5.7 and MariaDB since 10.2 - refuses
+     * that for an integer column, so writing a `bool` field was an error there while a lenient
+     * server coerced it to 0 and said nothing. It went unnoticed until the first install onto a
+     * correctly configured database, which failed on the first row it wrote.
+     *
+     * Strict mode is set for this connection rather than assumed, so the test means the same
+     * thing on whatever the suite is pointed at.
+     */
+    public function testABooleanIsWrittenAsANumberEvenInStrictMode(): void {
+        $previous = (string)$this->db->fetchOne('select @@session.sql_mode');
+        $this->db->query("set session sql_mode = 'STRICT_TRANS_TABLES'");
+        try {
+            $tableName = $this->em->tableName(TestUser::class);
+            $this->db->insert($tableName, ['name' => 'Alice', 'active' => false]);
+            $this->db->insert($tableName, ['name' => 'Bob', 'active' => true]);
+            $this->assertSame(
+                ['0', '1'],
+                array_map('strval', $this->db->fetchColumn(
+                    'select active from ' . $this->safeTableName(TestUser::class) . ' order by name'
+                ))
+            );
+        } finally {
+            // the value came from the server and is a list of mode names - checked all the same,
+            // because putting a value into SQL by hand is putting a value into SQL by hand
+            $restore = preg_match('/^[A-Z_,]*$/', $previous) === 1 ? $previous : '';
+            $this->db->query("set session sql_mode = '$restore'");
+        }
+    }
+
+    /**
+     * The same for a boolean bound in a condition rather than written
+     */
+    public function testABooleanConditionMatchesTheRowsItNames(): void {
+        $this->insertUser('Alice', '', true);
+        $this->insertUser('Bob', '', false);
+        $names = $this->db->fetchColumn(
+            'select name from ' . $this->safeTableName(TestUser::class) . ' where active = :active',
+            [':active' => true]
+        );
+        $this->assertSame(['Alice'], array_map('strval', $names));
+    }
+
     // --- update() ---
 
     public function testUpdateWithCondition(): void {
