@@ -363,6 +363,43 @@ class MariaQueryBuilderTest extends TestCase {
         $this->assertStringContainsString('create table `custom_name`', $qb->createTable(RenamedEntity::class));
     }
 
+    // --- addColumn ---
+
+    public function testAddColumnUsesTheSameDefinitionAsCreateTable(): void {
+        $sql = $this->qb->addColumnByName(TestUser::class, 'active');
+        $this->assertSame('alter table `testuser` add column `active` tinyint(1) default 0', $sql);
+        // the very point of building it from the metadata: a column added to a live table and
+        // the same column on a fresh install cannot differ
+        $this->assertStringContainsString('`active` tinyint(1) default 0', $this->qb->createTable(TestUser::class));
+    }
+
+    public function testAddColumnRefusesAColumnTheEntityDoesNotHave(): void {
+        $this->expectException(EntityManagerException::class);
+        $this->expectExceptionMessage("There is no column 'nonsense'");
+        $this->qb->addColumnByName(TestUser::class, 'nonsense');
+    }
+
+    /**
+     * The mirror keeps its own rules, exactly as it would on a fresh install: history has to
+     * survive the deletion of what it refers to, and the same row appears once per revision
+     */
+    public function testAddAuditColumnDropsWhatTheMirrorNeverHas(): void {
+        $em = TestHelper::createEntityManager();
+        TestHelper::registerEntity($em, TestUser::class);
+        TestHelper::registerEntity($em, AuditedTestEntity::class);
+        $qb = new MariaQueryBuilder(new StubConfig(), $this->db, $em);
+
+        $unique = $qb->addAuditColumnByName(AuditedTestEntity::class, 'slug');
+        $this->assertStringContainsString('alter table `auditedtestentity_aud` add column `slug`', $unique);
+        $this->assertStringNotContainsString('unique', $unique);
+
+        $auto = $qb->addAuditColumnByName(AuditedTestEntity::class, 'id');
+        $this->assertStringNotContainsString('auto_increment', $auto);
+
+        $foreign = $qb->addAuditColumnByName(AuditedTestEntity::class, 'user_id');
+        $this->assertStringNotContainsString('foreign key', $foreign);
+    }
+
     // --- createAuditTable ---
 
     private function auditSql(): string {

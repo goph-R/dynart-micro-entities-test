@@ -112,6 +112,35 @@ class QueryExecutorTest extends IntegrationTestCase {
         $this->assertEquals(3, $count);
     }
 
+    // --- addColumn() ---
+
+    /**
+     * The column an entity gained after its table was created
+     *
+     * `TestUser` is created without `note` here by dropping it straight afterwards, which is the
+     * closest a test gets to "the table predates the attribute" - and then the column is added
+     * from the same metadata a fresh install would use, and has to be writable.
+     */
+    public function testAddColumnPutsAWritableColumnOnALiveTable(): void {
+        $this->createUserTable();
+        $table = $this->safeTableName(TestUser::class);
+        $this->db->query('alter table '.$table.' drop column `active`');
+
+        $this->qe->addColumn(TestUser::class, 'active');
+
+        $this->insertUser('Alice', '', true);
+        $this->assertSame(
+            ['1'],
+            array_map('strval', $this->db->fetchColumn('select `active` from '.$table))
+        );
+    }
+
+    public function testAddColumnRefusesAColumnTheEntityDoesNotHave(): void {
+        $this->createUserTable();
+        $this->expectException(\Dynart\Micro\Entities\EntityManagerException::class);
+        $this->qe->addColumn(TestUser::class, 'nonsense');
+    }
+
     // --- findColumns() ---
 
     public function testFindColumns(): void {

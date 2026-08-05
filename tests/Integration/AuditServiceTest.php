@@ -247,6 +247,38 @@ class AuditServiceTest extends IntegrationTestCase {
         $this->assertCount(1, $this->auditRows());
     }
 
+    // --- Adding a column to a live table ---
+
+    /**
+     * The mirror has to gain the column too, or the next save of *any* row of that class fails
+     *
+     * Every audited write copies the whole row into the `_aud` table, so a source table with a
+     * column its mirror does not have is not a cosmetic difference - it is an insert with the
+     * wrong number of columns, for every entity of the class rather than the one being changed.
+     */
+    public function testAddColumnWithAuditKeepsTheMirrorInStep(): void {
+        $table = $this->safeTableName(TestAudited::class);
+        $auditTable = $this->safeAuditTableName(TestAudited::class);
+        $this->db->query('alter table '.$table.' drop column `title`');
+        $this->db->query('alter table '.$auditTable.' drop column `title`');
+
+        $this->qe->addColumnWithAudit(TestAudited::class, 'title');
+
+        // the save is the assertion: with the mirror a column short this throws
+        $this->em->save($this->newAudited('after', 'A title'));
+        $rows = $this->auditRows();
+        $this->assertCount(1, $rows);
+        $this->assertSame('A title', $rows[0]['title']);
+    }
+
+    public function testAddColumnWithAuditIsSkippedForSomethingNotAudited(): void {
+        $table = $this->safeTableName(TestUser::class);
+        $this->db->query('alter table '.$table.' drop column `active`');
+        $this->qe->addColumnWithAudit(TestUser::class, 'active');   // no mirror to touch
+        $this->db->insert($this->em->tableName(TestUser::class), ['name' => 'Alice', 'active' => true]);
+        $this->assertSame(['1'], array_map('strval', $this->db->fetchColumn('select `active` from '.$table)));
+    }
+
     // --- Subscriptions ---
 
     public function testSubscribeAllIsIdempotent(): void {
